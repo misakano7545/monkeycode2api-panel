@@ -68,6 +68,35 @@ docker compose up -d --build                       # Docker（KEY 走 MC2A_API_K
 
 面板：<http://127.0.0.1:7887/panel/>（用同一把 API key 登录）。
 
+面板结构与本族其他 `*2api-panel` 一致（照 `workbuddy2api-panel` 的形态）：
+
+| 前端 | 后端 |
+|---|---|
+| `internal/panel/index.html` 页面骨架 + 设计令牌（明暗两套） | `internal/panel/panel.go` 路由、`withAuth`、`writeJSON`/`writeErr` |
+| `internal/panel/theme.js` 首屏主题预热（`<head>` 同步加载） | `internal/panel/index.go` go:embed + 内容指纹 + 严格 CSP |
+| `internal/panel/app.js` 全部前端逻辑（无内联脚本，CSP 免 unsafe-inline） | `internal/panel/{accounts,models,usage,config,ring}.go` 分域处理 |
+
+页面：**账号池**（统计条 + 账号表 + 单号操作）、**用量**（按天 + 最近请求）、
+**模型与档位**、**配置**（读写 `config.json`，密钥脱敏回传）、**运行日志**（按频道筛选）。
+
+接口（`Authorization: Bearer <api_key>`，与 `/v1/*` 同一口径）：
+
+```
+GET  /panel/api/overview             池总览 + 账号行（5 秒轮询的唯一数据源）
+GET  /panel/api/logs                 日志环快照（chat / task / sys 三频道）
+GET  /panel/api/models               模型目录（含各地区拉取时间）
+POST /panel/api/models/refresh       按地区拉一次上游模型清单
+GET  /panel/api/usage?days=7         按天用量
+GET  /panel/api/request_logs?limit=60 最近请求
+GET  /panel/api/config               当前配置（api_key 脱敏）
+POST /panel/api/config               保存配置（返回需重启的字段）
+POST /panel/api/accounts/add_session 粘贴 session 添加（校验 + 发现 image_id）
+POST /panel/api/accounts/import      批量导入账号 JSON
+POST /panel/api/accounts/{id}/checkin|balance|disable|revive|cooldown_clear|remove
+POST /panel/api/checkin_all          全部签到
+POST /panel/api/balance_all          全部刷新额度
+```
+
 ### 4. 验证
 
 ```bash
@@ -190,7 +219,8 @@ internal/account 账号（auths/*.json）
 internal/upstream 上游：REST / WebSocket / ACP 解析 / 模型目录
 internal/pool    账号池（一账号一任务、冷却、停用）
 internal/server  协议编解码（openai.go / anthropic.go / responses.go）+ 执行层 run.go
-internal/panel   面板（/panel/ + /panel/api/*）
+internal/panel   面板（index.html + theme.js + app.js 经 go:embed；/panel/api/* 分域处理）
+internal/httpauth Bearer 鉴权（server 与 panel 同一口径）
 internal/usage   请求日志与每日汇总
 internal/scheduler 每日额度检查 + 自动签到
 ```

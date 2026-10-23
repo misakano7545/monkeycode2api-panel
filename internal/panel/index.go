@@ -1,0 +1,100 @@
+// index.go 面板静态资源与安全响应头。
+//
+// 资源经 go:embed 打进二进制（随服务部署，无外部构建步骤）：
+//   - index.html  页面骨架
+//   - theme.js    首屏主题预热（<head> 同步加载，早于样式表）
+//   - app.js      全部前端逻辑（独立文件而非内联，为了启用无需 unsafe-inline 的严格 CSP）
+//
+// 安全头对「面板页面与全部 /panel/api/* 响应」统一生效：CSP 限制脚本只能来自本服务，
+// 禁止被 iframe 嵌套（防点击劫持），禁 MIME 嗅探，并声明不泄露 Referer 出去。
+package panel
+
+import (
+	"crypto/sha256"
+	_ "embed"
+	"encoding/hex"
+	"net/http"
+	"strings"
+)
+
+//go:embed index.html
+var indexHTMLRaw []byte
+
+//go:embed theme.js
+var themeJS []byte
+
+//go:embed app.js
+var appJS []byte
+
+// fingerprint 取内容 sha256 前 8 字节，把脚本 URL 绑到脚本内容上。
+//
+// 为什么需要：no-store 只是对浏览器的一维约定；中间任何一层（反代缓存、浏览器
+// 扩展、企业网关的静态资源缓存）回放一次旧 app.js，新 HTML 配旧 JS 就会因 DOM
+// 结构漂移而中途抛异常。加性防御：URL 带内容指纹，跨版本必然不同，旧条目命不中。
+func fingerprint(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
+}
+
+// indexHTML 是把 <script src="theme.js"> / <script src="app.js"> 换成带指纹 URL
+// 之后的页面字节（源码里保持无查询串形态，指纹只在运行时注入）。
+var indexHTML = func() []byte {
+	s := strings.ReplaceAll(string(indexHTMLRaw), `src="theme.js"`, `src="theme.js?v=`+fingerprint(themeJS)+`"`)
+	s = strings.ReplaceAll(s, `src="app.js"`, `src="app.js?v=`+fingerprint(appJS)+`"`)
+	return []byte(s)
+}()
+
+// csp 内容安全策略（严格版，无需 unsafe-inline）：
+//   - default-src 'none'     默认全禁，逐个开口
+//   - script-src 'self'      只跑同源脚本；页面无内联事件处理器/内联脚本
+//   - style-src 'self' 'unsafe-inline'
+//     style 的内联是设计取舍：页面有少量 style="..." 属性（弹窗宽度、进度条），
+//     允许内联样式不会导致脚本执行；仍禁止外部样式域与 @import 外链。
+//   - connect-src 'self'     前端 fetch 只能打本服务
+//   - img-src 'self' data:   图标/内联图
+//   - form-action 'none'     页面无表单提交目标（配置页是 JS 提交）
+//   - frame-ancestors 'none' 禁止被任何站点 iframe 嵌套（点击劫持）
+//   - base-uri 'none'        禁止注入 <base> 改写相对路径
+const csp = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+	"connect-src 'self'; img-src 'self' data:; form-action 'none'; " +
+	"frame-ancestors 'none'; base-uri 'none'"
+
+// setSecurityHeaders 写入面板统一安全响应头（页面与 API 都要，API 也含 JSON 数据）。
+func setSecurityHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Security-Policy", csp)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+}
+
+// index 输出面板页面（静态无秘密；数据接口 /panel/api/* 才走鉴权）。
+func (p *Panel) index(w http.ResponseWriter, r *http.Request) {
+	setSecurityHeaders(w)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(indexHTML)
+}
+
+// themeScript 输出首屏主题预热脚本。
+//
+// 必须被 <head> 以同步外链方式加载（CSP 禁内联）：晚于样式表就回到「刷新先闪深色」，
+// 因为用户的明暗偏好只存在浏览器 localStorage 里，服务端无从得知。
+func (p *Panel) themeScript(w http.ResponseWriter, r *http.Request) {
+	setSecurityHeaders(w)
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(themeJS)
+}
+
+// appScript 输出前端逻辑（同源脚本，供 CSP script-src 'self' 加载）。
+func (p *Panel) appScript(w http.ResponseWriter, r *http.Request) {
+	setSecurityHeaders(w)
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(appJS)
+}

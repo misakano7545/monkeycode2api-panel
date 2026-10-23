@@ -6,18 +6,17 @@ package server
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/misakano7545/monkeycode2api-panel/internal/account"
 	"github.com/misakano7545/monkeycode2api-panel/internal/config"
+	"github.com/misakano7545/monkeycode2api-panel/internal/httpauth"
 	"github.com/misakano7545/monkeycode2api-panel/internal/pool"
 	"github.com/misakano7545/monkeycode2api-panel/internal/upstream"
 	"github.com/misakano7545/monkeycode2api-panel/internal/usage"
@@ -45,6 +44,7 @@ func New(cfg *config.Config, store *account.Store, catalog *upstream.Catalog, p 
 	s.mux.HandleFunc("POST /v1/messages/count_tokens", s.withAnthropicAuth(s.countTokens))
 	s.mux.HandleFunc("POST /messages", s.withAnthropicAuth(s.messages))
 	s.mux.HandleFunc("POST /v1/responses", s.withAuth(s.responses))
+	s.mux.HandleFunc("POST /v2/chat/busy", s.withAuth(s.chatBusy))
 	s.mux.HandleFunc("GET /v1/models", s.withAuth(s.models))
 	s.mux.HandleFunc("GET /v1/models/{id...}", s.withAuth(s.models))
 	s.mux.HandleFunc("GET /status", s.withAuth(s.status))
@@ -69,25 +69,11 @@ func (s *Server) Client(r upstream.Region) *upstream.Client {
 
 // ─── 鉴权 ────────────────────────────────────────────────────
 
-func (s *Server) keyOK(got string) bool {
-	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(s.Cfg.APIKey)) == 1
-}
-
-func bearer(r *http.Request) string {
-	h := r.Header.Get("Authorization")
-	if rest, ok := strings.CutPrefix(h, "Bearer "); ok {
-		return strings.TrimSpace(rest)
-	}
-	return ""
-}
-
+// withAuth 网关统一鉴权：Bearer（OpenAI 客户端标准），x-api-key 也认。
 func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		key := bearer(r)
-		if key == "" {
-			key = r.Header.Get("x-api-key")
-		}
-		if !s.keyOK(key) {
+		httpauth.PromoteAPIKey(r)
+		if !httpauth.VerifyBearer(r, s.Cfg.APIKey) {
 			writeOpenAIError(w, http.StatusUnauthorized, "invalid_api_key", "API key 无效")
 			return
 		}
@@ -95,15 +81,13 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// withAnthropicAuth Claude 客户端用 x-api-key，也接受 Bearer。
+// withAnthropicAuth Claude 官方 SDK 用 x-api-key，不是 Bearer。空 Authorization
+// 时提升，再走同一套常量时间比较（与面板同一口径）。
 func (s *Server) withAnthropicAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		key := r.Header.Get("x-api-key")
-		if key == "" {
-			key = bearer(r)
-		}
-		if !s.keyOK(key) {
-			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "API key 无效")
+		httpauth.PromoteAPIKey(r)
+		if !httpauth.VerifyBearer(r, s.Cfg.APIKey) {
+			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "missing or invalid API key")
 			return
 		}
 		next(w, r)
@@ -144,8 +128,17 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 	accounts := s.Store.List()
 	snap := s.Pool.Snapshot()
 	out := make([]map[string]any, 0, len(accounts))
+	var healthy, cooling, disabled int
 	for _, a := range accounts {
 		st := snap[a.ID]
+		switch {
+		case a.Disabled:
+			disabled++
+		case st.Cooldown != "":
+			cooling++
+		case !st.Busy && a.Ready():
+			healthy++
+		}
 		row := map[string]any{
 			"id": a.ID, "region": a.Region, "name": a.Name, "user_id": a.UserID,
 			"image_id": a.ImageID != "", "disabled": a.Disabled,
@@ -158,11 +151,38 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		}
 		out = append(out, row)
 	}
+	// 汇总键与面板 overview 同口径（total/healthy/cooling/disabled），
+	// 面板与外部监控读同一组数字，避免两套计数各说各话。
 	writeJSON(w, http.StatusOK, map[string]any{
 		"uptime_seconds": int(time.Since(s.StartAt).Seconds()),
+		"total":          len(out),
+		"healthy":        healthy,
+		"cooling":        cooling,
+		"disabled":       disabled,
 		"accounts":       out,
 		"models":         len(s.Catalog.List()),
 	})
+}
+
+// chatBusy 账号池是否已满（一账号同时只跑一个任务）。
+//
+// 客户端/调度器在并发前先问一句，避免打进来才拿 503：busy=true 表示此刻没有
+// 空闲账号，请求会被拒绝而不是排队。
+func (s *Server) chatBusy(w http.ResponseWriter, _ *http.Request) {
+	snap := s.Pool.Snapshot()
+	var free, busy int
+	for _, a := range s.Store.List() {
+		if a.Disabled || !a.Ready() {
+			continue
+		}
+		st := snap[a.ID]
+		if st.Busy || st.Cooldown != "" {
+			busy++
+			continue
+		}
+		free++
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"busy": free == 0, "free": free, "in_flight": busy})
 }
 
 // ─── 目录刷新（懒加载 / 面板手动）────────────────────────────

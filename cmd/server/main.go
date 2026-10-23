@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -20,6 +21,9 @@ import (
 	"github.com/misakano7545/monkeycode2api-panel/internal/upstream"
 	"github.com/misakano7545/monkeycode2api-panel/internal/usage"
 )
+
+// version 构建版本（Dockerfile 用 -X main.version 注入；本地构建为 dev）。
+var version = "dev"
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "配置文件路径")
@@ -42,9 +46,15 @@ func main() {
 	srv := server.New(cfg, store, catalog, p, ledger)
 
 	if cfg.Panel.Enabled {
-		srv.Mount("/panel/", panel.Handler(panel.Deps{
-			Cfg: cfg, Store: store, Catalog: catalog, Pool: p, Ledger: ledger,
-			RefreshCatalog: srv.RefreshCatalog,
+		// 日志镜像进面板环形缓冲：log 包输出 → stderr（容器日志）+ Ring（面板「运行日志」）。
+		ring := panel.NewRing(500)
+		log.SetOutput(io.MultiWriter(os.Stderr, ring))
+		srv.Mount("/panel/", panel.New(panel.Config{
+			Store: store, Pool: p, Catalog: catalog, Ledger: ledger, Logs: ring,
+			Client:     srv.Client,
+			APIKey:     cfg.APIKey,
+			Version:    version,
+			ConfigPath: *cfgPath,
 		}))
 	}
 
