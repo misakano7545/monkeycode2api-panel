@@ -62,7 +62,31 @@ curl -X POST localhost:7887/panel/api/accounts/login \
 （`GET /api/v1/users/login` 是 302 到 `baizhi.cloud/oauth/authorize`，短信验证码自动化不了），
 团队管理员走的是 `/api/v1/teams/users/login` 另一套 cookie —— 这两种仍用方式 B。
 
-**方式 B：粘贴 session**
+**方式 B：官方登录 + 粘贴（OAuth 只能做到这一步）**
+
+面板「粘贴 Session」页有 `百智云 / Google / GitHub` 三个按钮：服务端把授权页地址拼好，
+点开在**你自己的浏览器**里登录，回来把 cookie 粘上（DevTools 里右键请求 →「复制为 cURL」整段也能识别）。
+
+```bash
+curl -X POST localhost:7887/panel/api/accounts/oauth/start \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{"region":"intl","method":"github"}'      # method: baizhi | google | github
+```
+
+为什么不能像 WorkBuddy 那样点一下就自动进池（零粘贴）：
+
+| 卡点 | 实测证据 |
+|---|---|
+| `redirect_uri` 写死 | `/users/login?redirect=http://127.0.0.1:7887/x` 的 302 里 `redirect_uri` 仍是 `https://<站点>/api/v1/users/baizhi/callback` |
+| 回调由服务端消费 code | `GET /api/v1/users/baizhi/callback?code=fake` → 302 `/login?error=invalid_token`，地址栏不会留下 code |
+| 没有设备码 / 轮询端点 | 全量 `/api/v1/*` 里没有对应物；WorkBuddy 有 `/v2/plugin/auth/token?state=…` |
+| 国内版没开 Google/GitHub | `GET /users/oauth/github/login` → `10626 该登录方式暂未启用` |
+| 国际版百智云没配 | `/users/login` 的 302 里 `client_id=` 为空 |
+
+要真正的零粘贴，只剩「服务器上跑一个浏览器、用户通过面板操作」这条路（chromium + CDP/noVNC），
+本项目不引入。
+
+**方式 C：粘贴 session**
 
 1. 浏览器登录 <https://monkeycode-ai.com/>（国际版 <https://monkeycode-ai.net/>）；
 2. F12 → Application → Cookies → 复制 `monkeycode_ai_session` 的值；
@@ -109,6 +133,7 @@ GET  /panel/api/config               当前配置（api_key 脱敏）
 POST /panel/api/config               保存配置（返回需重启的字段）
 POST /panel/api/accounts/add_session 粘贴 session 添加（校验 + 发现 image_id）
 POST /panel/api/accounts/login      账号密码登录（服务端解验证码换 cookie）
+POST /panel/api/accounts/oauth/start 官方登录授权页地址（百智云/Google/GitHub）
 POST /panel/api/accounts/import      批量导入账号 JSON
 POST /panel/api/accounts/{id}/checkin|balance|disable|revive|cooldown_clear|remove
 POST /panel/api/checkin_all          全部签到

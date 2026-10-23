@@ -248,6 +248,28 @@ function addState(msg, cls) {
   el.className = 'state ' + (cls || '');
   el.textContent = msg;
 }
+// 官方登录：只拿授权页地址，登录在用户自己的浏览器里完成（凭证落不到服务端）。
+document.querySelectorAll('[data-oauth]').forEach(b => b.onclick = async () => {
+  const method = b.dataset.oauth;
+  // 同步开窗：await 之后 window.open 会被弹窗拦截器当广告拦掉。
+  const w = window.open('about:blank', '_blank');
+  b.disabled = true;
+  addState('取授权地址…', 'dots');
+  try {
+    const r = await api('accounts/oauth/start', {
+      method: 'POST',
+      body: JSON.stringify({ region: $('addRegion').value, method }),
+    });
+    if (w) w.location.href = r.url;
+    addState('已打开登录页：登录完成后回到这里，把 cookie（或「复制为 cURL」整段）粘到下面。' +
+      (w ? '' : ' 弹窗被拦了，手动打开：' + r.url), w ? 'ok' : 'err');
+    $('addSession').focus();
+  } catch (err) {
+    if (w) w.close();
+    addState(err.message, 'err');
+  }
+  b.disabled = false;
+});
 $('btnAddSubmit').onclick = async () => {
   const b = $('btnAddSubmit');
   b.disabled = true;

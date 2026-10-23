@@ -77,6 +77,15 @@ func (a *Account) Ready() bool {
 // 识别不出就用默认名。
 func NormalizeSession(raw string) (name, value string) {
 	s := strings.TrimSpace(raw)
+	// DevTools「复制为 cURL」整段粘贴：先抠出 cookie 头，再走下面的统一解析。
+	// shortcut: 只认 -H 'cookie: …'（Chrome/Firefox 都是这个形态），-b '…' 不支持。
+	if i := strings.Index(strings.ToLower(s), "cookie:"); i > 0 {
+		s = s[i+len("cookie:"):]
+		if j := strings.IndexAny(s, "'\"\n"); j >= 0 {
+			s = s[:j]
+		}
+		s = strings.TrimSpace(s)
+	}
 	if rest, ok := strings.CutPrefix(s, "Cookie:"); ok {
 		s = strings.TrimSpace(rest)
 	} else if rest, ok := strings.CutPrefix(s, "cookie:"); ok {

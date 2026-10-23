@@ -17,7 +17,10 @@ func TestNormalizeSession(t *testing.T) {
 		"monkeycode_ai_session=abc123; path=/; HttpOnly": {DefaultCookieName, "abc123"},
 		"monkeycode_ai_team_session=team-tok; Path=/":    {"monkeycode_ai_team_session", "team-tok"},
 		"nebula_session=n1":                              {"nebula_session", "n1"},
-		"":                                               {DefaultCookieName, ""},
+		// DevTools「复制为 cURL」整段（Chrome 形）：抠 cookie 头，别把整条命令当 cookie 值。
+		`curl 'https://monkeycode-ai.com/api/v1/users/status' -H 'cookie: monkeycode_ai_session=abc123; _ga=GA1.1' -H 'accept: application/json'`: {"monkeycode_ai_session", "abc123"},
+		`curl "https://monkeycode-ai.net/x" -H "Cookie: nebula_session=n9; a=b"`:                                                                  {"nebula_session", "n9"},
+		"": {DefaultCookieName, ""},
 	}
 	for in, w := range cases {
 		name, value := NormalizeSession(in)

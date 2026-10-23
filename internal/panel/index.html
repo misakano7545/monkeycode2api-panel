@@ -523,9 +523,17 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
             <option value="intl">国际版 · monkeycode-ai.net</option>
           </select>
         </label>
+        <div class="fld"><span class="lb">官方登录（点开登录，回来粘 cookie）</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="xs" data-oauth="baizhi">百智云登录</button>
+            <button class="xs" data-oauth="google">Google</button>
+            <button class="xs" data-oauth="github">GitHub</button>
+          </div>
+          <span class="hint">国内版只有百智云可用（Google/GitHub 上游返回「暂未启用」）；国际版三个都试得通，但百智云在国际版没配 client_id。</span>
+        </div>
         <label class="fld"><span class="lb">Session Cookie</span>
-          <textarea id="addSession" placeholder="monkeycode_ai_session=… 或只粘贴值"></textarea>
-          <span class="hint">整段 Cookie 也能识别：会自动挑出会话项并记住 cookie 名。</span>
+          <textarea id="addSession" placeholder="monkeycode_ai_session=… / 只粘贴值 / DevTools 里「复制为 cURL」整段"></textarea>
+          <span class="hint">整段 Cookie 和 cURL 命令都能识别：会自动挑出会话项并记住 cookie 名。</span>
         </label>
         <label class="fld"><span class="lb">image_id（可留空）</span>
           <input id="addImage" placeholder="留空则从历史任务自动发现">

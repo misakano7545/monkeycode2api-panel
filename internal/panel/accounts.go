@@ -154,6 +154,41 @@ func (p *Panel) loginAccount(w http.ResponseWriter, r *http.Request) {
 	p.finishAdd(w, r, client, region, name, value, "")
 }
 
+type oauthReq struct {
+	Region string `json:"region"`
+	Method string `json:"method"`
+}
+
+// oauthStart 生成官方登录的授权页地址，前端拿去 window.open。
+//
+// 只到「打开登录页」为止：凭证落在用户浏览器里，拿不回来（见 upstream/oauth.go 顶部）。
+func (p *Panel) oauthStart(w http.ResponseWriter, r *http.Request) {
+	var req oauthReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "请求体不是合法 JSON")
+		return
+	}
+	region, err := upstream.ParseRegion(req.Region)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	client := p.client(region)
+	if client == nil {
+		writeErr(w, http.StatusNotImplemented, "上游客户端未装配")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	u, err := client.LoginURL(ctx, req.Method, "/console/tasks")
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "取授权地址失败："+err.Error())
+		return
+	}
+	log.Printf("panel: 生成 %s 登录地址（%s）", req.Method, region.Label())
+	okJSON(w, "已打开登录页，完成登录后回来粘贴 cookie", map[string]any{"url": u, "method": req.Method})
+}
+
 // imageWarn 缺 image_id 的提示（上游建任务必填，新账号常拿不到）。
 func imageWarn(imageID string) string {
 	if imageID == "" {

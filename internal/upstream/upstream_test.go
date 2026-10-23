@@ -1,10 +1,13 @@
 package upstream
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildPrompt(t *testing.T) {
@@ -131,5 +134,13 @@ func TestModelID(t *testing.T) {
 	}
 	if !strings.Contains(ModelID(Model{Provider: "a", Model: "b"}), "/") {
 		t.Fatal("provider 存在时应带斜杠")
+	}
+}
+
+// 未知登录方式在打网络之前就拒（面板传错值时不会去捅上游）。
+func TestLoginURLRejectsUnknownMethod(t *testing.T) {
+	c := &Client{Region: CN, HTTP: &http.Client{Timeout: time.Second}}
+	if _, err := c.LoginURL(context.Background(), "wechat", ""); err == nil {
+		t.Fatal("未知登录方式应当报错")
 	}
 }
