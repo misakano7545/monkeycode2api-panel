@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MonkeyCode 2API 面板</title>
+<style>
+:root{--bg:#0e1116;--card:#161b22;--line:#232a34;--fg:#e6edf3;--dim:#8b949e;--acc:#4f9cf9;--ok:#3fb950;--warn:#d29922;--err:#f85149}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line);background:#11161d;position:sticky;top:0;z-index:5}
+h1{font-size:16px;margin:0;font-weight:600}
+h1 span{color:var(--acc)}
+.spacer{flex:1}
+main{padding:20px;max-width:1180px;margin:0 auto;display:grid;gap:18px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+section h2{font-size:14px;margin:0 0 12px;color:var(--dim);font-weight:600;letter-spacing:.4px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--dim);font-weight:500;font-size:12px}
+tr:last-child td{border-bottom:none}
+input,select,button,textarea{font:inherit;color:var(--fg);background:#0d1117;border:1px solid var(--line);border-radius:6px;padding:7px 10px}
+button{cursor:pointer;background:#1f6feb;border-color:#1f6feb}
+button.ghost{background:transparent;border-color:var(--line);color:var(--dim)}
+button.ghost:hover{color:var(--fg);border-color:var(--acc)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;border:1px solid var(--line);color:var(--dim)}
+.ok{color:var(--ok);border-color:#1d4d29}
+.warn{color:var(--warn);border-color:#4d3c11}
+.err{color:var(--err);border-color:#5a1e1e}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.muted{color:var(--dim)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.stat{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.stat b{display:block;font-size:20px;font-weight:600}
+.stat small{color:var(--dim)}
+.toast{position:fixed;right:18px;bottom:18px;background:#1f6feb;color:#fff;padding:10px 16px;border-radius:8px;opacity:0;transition:.25s;pointer-events:none;max-width:60vw}
+.toast.show{opacity:1}
+.toast.bad{background:var(--err)}
+textarea{width:100%;min-height:64px;resize:vertical}
+</style>
+</head>
+<body>
+<header>
+  <h1>MonkeyCode <span>2API</span></h1>
+  <span class="tag" id="health">连接中…</span>
+  <div class="spacer"></div>
+  <input id="key" type="password" placeholder="API Key" style="width:220px">
+  <button class="ghost" onclick="saveKey()">保存</button>
+</header>
+
+<main>
+  <section>
+    <h2>概览</h2>
+    <div class="grid" id="stats"></div>
+  </section>
+
+  <section>
+    <h2>添加账号（浏览器登录后复制 monkeycode_ai_session）</h2>
+    <div class="row">
+      <select id="addRegion">
+        <option value="cn">国内版 monkeycode-ai.com</option>
+        <option value="intl">国际版 monkeycode-ai.net</option>
+      </select>
+      <input id="addImage" placeholder="image_id（可空，自动发现）" style="width:280px">
+    </div>
+    <div style="margin-top:8px"><textarea id="addSession" placeholder="粘贴 cookie 值：monkeycode_ai_session=…（整行 Cookie 也能识别）"></textarea></div>
+    <div class="row" style="margin-top:8px">
+      <button onclick="addAccount()">校验并添加</button>
+      <span class="muted">session 有效期 30 天且不可续期，过期只能重新粘贴。</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>账号池</h2>
+    <table>
+      <thead><tr><th>账号</th><th>地区</th><th>状态</th><th>今日额度</th><th>积分</th><th>image_id</th><th>操作</th></tr></thead>
+      <tbody id="accounts"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>模型目录</h2>
+    <div class="row" style="margin-bottom:10px">
+      <button onclick="refreshModels()">刷新模型清单</button>
+      <span class="muted" id="modelMeta"></span>
+    </div>
+    <div id="models" class="row"></div>
+  </section>
+
+  <section>
+    <h2>用量</h2>
+    <table>
+      <thead><tr><th>日期</th><th>请求</th><th>失败</th><th>输出字符</th><th>输入 tokens</th><th>输出 tokens</th></tr></thead>
+      <tbody id="usage"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>最近请求</h2>
+    <table>
+      <thead><tr><th>时间</th><th>协议</th><th>模型</th><th>账号</th><th>状态</th><th>耗时</th><th>错误</th></tr></thead>
+      <tbody id="logs"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody>
+    </table>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+<script>
+const $ = s => document.querySelector(s);
+let KEY = localStorage.getItem('mc2a_key') || '';
+$('#key').value = KEY;
+
+function toast(msg, bad) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (bad ? ' bad' : '');
+  setTimeout(() => t.className = 'toast', 2600);
+}
+function saveKey() { KEY = $('#key').value.trim(); localStorage.setItem('mc2a_key', KEY); loadAll(); }
+
+async function api(path, opts = {}) {
+  opts.headers = Object.assign({'X-API-Key': KEY}, opts.headers || {});
+  const res = await fetch(path, opts);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+  return body;
+}
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = n => (n ?? 0).toLocaleString();
+
+async function loadHealth() {
+  try {
+    const r = await fetch('/healthz');
+    const j = await r.json();
+    $('#health').textContent = '在线 · ' + j.accounts + ' 账号';
+    $('#health').className = 'tag ok';
+  } catch (e) {
+    $('#health').textContent = '离线';
+    $('#health').className = 'tag err';
+  }
+}
+
+async function loadAccounts() {
+  if (!KEY) { $('#accounts').innerHTML = '<tr><td colspan="7" class="muted">先填 API Key</td></tr>'; return; }
+  try {
+    const {accounts} = await api('/panel/api/accounts');
+    if (!accounts.length) { $('#accounts').innerHTML = '<tr><td colspan="7" class="muted">还没有账号，先在上面粘贴 session</td></tr>'; return; }
+    let ready = 0, busy = 0, tokens = 0;
+    $('#accounts').innerHTML = accounts.map(a => {
+      if (a.ready && !a.disabled) ready++;
+      if (a.busy) busy++;
+      const w = a.wallet || {};
+      if (w.daily_token_balance > 0) tokens += w.daily_token_balance;
+      const st = [];
+      if (a.disabled) st.push('<span class="tag err">已停用</span>');
+      else if (a.busy) st.push('<span class="tag ok">跑任务中</span>');
+      else if (a.cooldown) st.push(`<span class="tag warn">冷却 ${esc(a.cool_kind||'')} ${esc(a.cooldown)}</span>`);
+      else st.push('<span class="tag ok">可用</span>');
+      if (!a.image_id) st.push('<span class="tag warn">缺 image_id</span>');
+      if (a.expiring) st.push('<span class="tag warn">临期</span>');
+      const quota = w.daily_token_limit > 0
+        ? `${num(w.daily_token_balance)} / ${num(w.daily_token_limit)}`
+        : '<span class="muted">未拉取</span>';
+      return `<tr>
+        <td>${esc(a.name || a.user_id || a.id)}<div class="muted mono">${esc(a.id)}</div></td>
+        <td>${a.region === 'intl' ? '国际版' : '国内版'}</td>
+        <td>${st.join(' ')}</td>
+        <td class="mono">${quota}</td>
+        <td class="mono">${num(w.balance)}</td>
+        <td class="mono muted">${esc((a.image_id||'—').slice(0,12))}</td>
+        <td class="row">
+          <button class="ghost" onclick="act('${a.id}','wallet')">额度</button>
+          <button class="ghost" onclick="act('${a.id}','checkin')">签到</button>
+          <button class="ghost" onclick="act('${a.id}','toggle')">${a.disabled?'启用':'停用'}</button>
+          ${a.cooldown ? `<button class="ghost" onclick="act('${a.id}','cooldown_clear')">解冷却</button>` : ''}
+          <button class="ghost" onclick="del('${a.id}')">删除</button>
+        </td>
+      </tr>`;
+    }).join('');
+    $('#stats').innerHTML = `
+      <div class="stat"><b>${accounts.length}</b><small>账号</small></div>
+      <div class="stat"><b>${ready}</b><small>可用</small></div>
+      <div class="stat"><b>${busy}</b><small>跑任务中</small></div>
+      <div class="stat"><b>${num(tokens)}</b><small>今日剩余 token</small></div>`;
+  } catch (e) {
+    $('#accounts').innerHTML = `<tr><td colspan="7" class="err">${esc(e.message)}</td></tr>`;
+  }
+}
+
+async function act(id, action) {
+  try {
+    const r = await api(`/panel/api/accounts/${id}/${action}`, {method:'POST'});
+    toast(r.message || '完成');
+  } catch (e) { toast(e.message, true); }
+  loadAccounts();
+}
+
+async function del(id) {
+  if (!confirm('删除账号 ' + id + '？')) return;
+  try { await api(`/panel/api/accounts/${id}`, {method:'DELETE'}); toast('已删除'); }
+  catch (e) { toast(e.message, true); }
+  loadAccounts();
+}
+
+async function addAccount() {
+  const session = $('#addSession').value.trim();
+  if (!session) return toast('先粘贴 session', true);
+  try {
+    const r = await api('/panel/api/accounts', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({region: $('#addRegion').value, session, image_id: $('#addImage').value.trim()})
+    });
+    $('#addSession').value = '';
+    toast(r.warning || '已添加');
+    loadAccounts(); loadModels();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function loadModels() {
+  if (!KEY) return;
+  try {
+    const r = await fetch('/v1/models', {headers:{Authorization:'Bearer ' + KEY}});
+    const j = await r.json();
+    const ids = (j.data || []).map(m => m.id);
+    $('#modelMeta').textContent = ids.length + ' 个模型';
+    $('#models').innerHTML = ids.slice(0, 60).map(id => `<span class="tag mono">${esc(id)}</span>`).join('') || '<span class="muted">还没有模型清单，点刷新</span>';
+  } catch (e) { $('#models').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+
+async function refreshModels() {
+  try { const r = await api('/panel/api/models/refresh', {method:'POST'}); toast(JSON.stringify(r.result)); }
+  catch (e) { toast(e.message, true); }
+  loadModels();
+}
+
+async function loadUsage() {
+  if (!KEY) return;
+  try {
+    const {days} = await api('/panel/api/usage?days=7');
+    $('#usage').innerHTML = (days || []).map(d => `<tr><td class="mono">${esc(d.date)}</td><td>${d.requests}</td><td>${d.errors}</td><td>${num(d.chars)}</td><td>${num(d.input)}</td><td>${num(d.output)}</td></tr>`).join('')
+      || '<tr><td colspan="6" class="muted">还没有请求</td></tr>';
+  } catch (e) { $('#usage').innerHTML = `<tr><td colspan="6" class="err">${esc(e.message)}</td></tr>`; }
+}
+
+async function loadLogs() {
+  if (!KEY) return;
+  try {
+    const {records} = await api('/panel/api/logs?limit=50');
+    $('#logs').innerHTML = (records || []).map(r => {
+      const t = new Date(r.ts * 1000).toLocaleString('zh-CN', {hour12:false});
+      const bad = r.status >= 400 || r.error;
+      return `<tr><td class="mono">${esc(t)}</td><td>${esc(r.protocol)}</td><td class="mono">${esc(r.model)}</td>
+        <td class="mono muted">${esc(r.account||'—')}</td>
+        <td class="${bad?'err':'ok'}">${r.status}</td><td class="mono">${r.ms}ms</td>
+        <td class="err">${esc(r.error||'')}</td></tr>`;
+    }).join('') || '<tr><td colspan="7" class="muted">还没有请求</td></tr>';
+  } catch (e) { $('#logs').innerHTML = `<tr><td colspan="7" class="err">${esc(e.message)}</td></tr>`; }
+}
+
+function loadAll() { loadHealth(); loadAccounts(); loadModels(); loadUsage(); loadLogs(); }
+loadAll();
+setInterval(() => { loadHealth(); loadAccounts(); }, 15000);
+</script>
+</body>
+</html>

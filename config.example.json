@@ -1,0 +1,27 @@
+{
+  "listen": ":7887",
+  "api_key": "change-me",
+  "auth_dir": "./auths",
+  "data_dir": "./data",
+  "cooldown": {
+    "hard_quota": "12h",
+    "soft_rate": "90s",
+    "err_cooldown": "10m",
+    "err_threshold": 5
+  },
+  "schedule": {
+    "checkin_enabled": true,
+    "checkin_hours": [9, 21],
+    "quota_check_hour": 0,
+    "quota_refresh_minutes": 30
+  },
+  "upstream": {
+    "timeout_seconds": 30,
+    "idle_timeout_seconds": 300,
+    "task_timeout_seconds": 7200,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+  },
+  "panel": {
+    "enabled": true
+  }
+}

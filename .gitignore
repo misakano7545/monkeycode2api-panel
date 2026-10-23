@@ -1,0 +1,8 @@
+config.json
+auths/
+data/
+*.log
+monkeycode2api-panel
+mc2api
+.env
+.session

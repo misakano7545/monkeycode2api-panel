@@ -1,0 +1,14 @@
+services:
+  mc2api:
+    build: .
+    container_name: mc2api
+    restart: unless-stopped
+    ports:
+      - "7887:7887"
+    environment:
+      - MC2A_API_KEY=${MC2A_API_KEY:?set MC2A_API_KEY}
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./auths:/app/auths
+      - ./data:/app/data
+      - ./config.json:/app/config.json:ro
