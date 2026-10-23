@@ -49,6 +49,10 @@ const (
 	EpTasks   = "/api/v1/users/tasks"
 	EpStream  = "/api/v1/users/tasks/stream"
 
+	// 账号密码登录（模拟网页登录，不需要浏览器）。
+	EpPasswordLogin = "/api/v1/users/password-login"
+	EpServerConfig  = "/api/v1/server/config"
+
 	// SessionCookie 普通用户会话 cookie 名（团队管理员是另一套，不接）。
 	SessionCookie = "monkeycode_ai_session"
 

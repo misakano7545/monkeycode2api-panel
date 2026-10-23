@@ -49,6 +49,37 @@ func New(region Region, ua string, timeout time.Duration) *Client {
 	return &Client{Region: region, UA: ua, HTTP: &http.Client{Timeout: timeout}}
 }
 
+// PasswordLogin 模拟网页的「账号密码登录」：解验证码 → POST password-login → 取 Set-Cookie。
+// 返回的 (name, value) 就是 session cookie，调用方按 NormalizeSession 落库即可。
+//
+// shortcut: 只覆盖普通用户；团队管理员走 /api/v1/teams/users/login（另一套 cookie），
+// 有团队号需求时再加。
+func (c *Client) PasswordLogin(ctx context.Context, email, password string) (string, string, error) {
+	token, err := c.SolveCaptcha(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	req, err := c.newReq(ctx, "", http.MethodPost, EpPasswordLogin, map[string]any{
+		"email": email, "password": password, "captcha_token": token,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	resp, raw, err := c.doRaw(req)
+	if err != nil {
+		return "", "", err
+	}
+	if err := decodeResp(raw, nil); err != nil {
+		return "", "", err
+	}
+	for _, ck := range resp.Cookies() {
+		if strings.HasSuffix(ck.Name, "session") && ck.Value != "" {
+			return ck.Name, ck.Value, nil
+		}
+	}
+	return "", "", &Error{Kind: KindUpstream, Msg: "登录成功但上游没有下发 session cookie（登录实现可能变了）"}
+}
+
 // API 响应外壳：code 非 0 即业务失败。
 type apiResp struct {
 	Code    int             `json:"code"`
@@ -62,17 +93,30 @@ func (c *Client) url(path string) string { return c.Region.Origin() + path }
 // doJSON 带 cookie 调上游。cookie 为空时不带（验证码等公开端点）。
 // cookie 是完整的 `name=value`（名字由账号记录决定，见 account.CookieHeader）。
 func (c *Client) doJSON(ctx context.Context, cookie, method, path string, body any, out any) error {
+	req, err := c.newReq(ctx, cookie, method, path, body)
+	if err != nil {
+		return err
+	}
+	_, raw, err := c.doRaw(req)
+	if err != nil {
+		return err
+	}
+	return decodeResp(raw, out)
+}
+
+// newReq 组装上游请求（UA / Origin / Referer 是过 WAF 的必要条件，缺了稳定 403）。
+func (c *Client) newReq(ctx context.Context, cookie, method, path string, body any) (*http.Request, error) {
 	var rd io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		rd = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.url(path), rd)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ua := c.UA
 	if ua == "" {
@@ -88,30 +132,38 @@ func (c *Client) doJSON(ctx context.Context, cookie, method, path string, body a
 	if cookie != "" {
 		req.Header.Set("Cookie", cookie)
 	}
+	return req, nil
+}
 
+// doRaw 发请求、读全量响应、把 HTTP 状态映射成错误种类。返回的 resp 仍可读 Header。
+func (c *Client) doRaw(req *http.Request) (*http.Response, []byte, error) {
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return &Error{Kind: KindUpstream, Msg: fmt.Sprintf("上游请求失败：%v", err)}
+		return nil, nil, &Error{Kind: KindUpstream, Msg: fmt.Sprintf("上游请求失败：%v", err)}
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
-		return &Error{Kind: KindUpstream, Msg: fmt.Sprintf("上游响应读取失败：%v", err)}
+		return resp, nil, &Error{Kind: KindUpstream, Msg: fmt.Sprintf("上游响应读取失败：%v", err)}
 	}
 
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return &Error{Kind: KindAuth, Status: resp.StatusCode, Msg: "上游登录态失效（HTTP " + fmt.Sprint(resp.StatusCode) + "）"}
+		return resp, raw, &Error{Kind: KindAuth, Status: resp.StatusCode, Msg: "上游登录态失效（HTTP " + fmt.Sprint(resp.StatusCode) + "）"}
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return &Error{Kind: KindRate, Status: resp.StatusCode, Msg: "上游限流（HTTP 429）"}
+		return resp, raw, &Error{Kind: KindRate, Status: resp.StatusCode, Msg: "上游限流（HTTP 429）"}
 	case resp.StatusCode == http.StatusNotFound:
-		return &Error{Kind: KindNotFound, Status: resp.StatusCode, Msg: "上游 404：" + truncate(string(raw), 160)}
+		return resp, raw, &Error{Kind: KindNotFound, Status: resp.StatusCode, Msg: "上游 404：" + truncate(string(raw), 160)}
 	case resp.StatusCode >= 500:
-		return &Error{Kind: KindUpstream, Status: resp.StatusCode, Msg: "上游 " + fmt.Sprint(resp.StatusCode) + "：" + truncate(string(raw), 160)}
+		return resp, raw, &Error{Kind: KindUpstream, Status: resp.StatusCode, Msg: "上游 " + fmt.Sprint(resp.StatusCode) + "：" + truncate(string(raw), 160)}
 	case resp.StatusCode >= 400:
-		return &Error{Kind: KindUpstream, Status: resp.StatusCode, Msg: "上游 HTTP " + fmt.Sprint(resp.StatusCode) + "：" + truncate(string(raw), 160)}
+		return resp, raw, &Error{Kind: KindUpstream, Status: resp.StatusCode, Msg: "上游 HTTP " + fmt.Sprint(resp.StatusCode) + "：" + truncate(string(raw), 160)}
 	}
+	return resp, raw, nil
+}
 
+// decodeResp 解 `{code,message,data}` 外壳；code 非 0 即业务失败。
+func decodeResp(raw []byte, out any) error {
 	var top map[string]json.RawMessage
 	if json.Unmarshal(raw, &top) == nil {
 		if _, has := top["code"]; !has {

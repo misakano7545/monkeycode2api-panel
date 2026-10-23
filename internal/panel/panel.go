@@ -69,6 +69,7 @@ func New(cfg Config) *Panel {
 	p.mux.HandleFunc("GET /panel/api/config", p.withAuth(p.getConfig))
 	p.mux.HandleFunc("POST /panel/api/config", p.withAuth(p.saveConfig))
 	p.mux.HandleFunc("POST /panel/api/accounts/add_session", p.withAuth(p.addSession))
+	p.mux.HandleFunc("POST /panel/api/accounts/login", p.withAuth(p.loginAccount))
 	p.mux.HandleFunc("POST /panel/api/accounts/import", p.withAuth(p.importAccounts))
 	p.mux.HandleFunc("POST /panel/api/accounts/{uid}/checkin", p.withAuth(p.accountCheckin))
 	p.mux.HandleFunc("POST /panel/api/accounts/{uid}/balance", p.withAuth(p.accountBalance))

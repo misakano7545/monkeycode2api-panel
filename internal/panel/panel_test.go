@@ -88,6 +88,24 @@ func TestAPIRequiresBearer(t *testing.T) {
 	}
 }
 
+// 密码登录入口：缺字段/坏地区必须在打上游之前就拒掉（不打网络、不耗验证码）。
+func TestLoginValidatesBeforeUpstream(t *testing.T) {
+	p := newPanel(t, "sk-test")
+	for _, tc := range []struct{ name, body, want string }{
+		{"缺密码", `{"region":"cn","email":"a@b.c"}`, "请填账号和密码"},
+		{"坏地区", `{"region":"mars","email":"a@b.c","password":"x"}`, "未知地区"},
+		{"坏 JSON", `{`, "不是合法 JSON"},
+	} {
+		req := httptest.NewRequest("POST", "/panel/api/accounts/login", strings.NewReader(tc.body))
+		req.Header.Set("Authorization", "Bearer sk-test")
+		rec := httptest.NewRecorder()
+		p.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Fatalf("%s: status=%d body=%s", tc.name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 // 日志频道归类：对话请求 / 任务动作 / 系统，各走各的容量。
 func TestRingClassify(t *testing.T) {
 	r := NewRing(2)

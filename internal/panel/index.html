@@ -492,15 +492,31 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
     <header>
       <h3>添加账号
         <span class="tabs" id="addTabs">
-          <button class="tab on" data-tab="session">粘贴 Session</button>
+          <button class="tab on" data-tab="login">账号密码登录</button>
+          <button class="tab" data-tab="session">粘贴 Session</button>
           <button class="tab" data-tab="json">导入 JSON</button>
         </span>
       </h3>
-      <div class="hint">浏览器登录 monkeycode-ai.com 后，从开发者工具复制 <code>monkeycode_ai_session</code> 的值（团队号是 <code>monkeycode_ai_team_session</code>）。session 30 天硬过期，不可续期。</div>
+      <div class="hint">密码登录由服务端模拟官网流程（自动解 Cap.js 验证码 → 换 session cookie），密码只用于这一次请求，不落盘。也可以用粘贴方式：开发者工具里复制 <code>monkeycode_ai_session</code> 的值（团队号是 <code>monkeycode_ai_team_session</code>）。session 30 天硬过期，不可续期。</div>
     </header>
     <div class="body">
       <div class="state" id="addState" hidden style="margin-bottom:12px"></div>
-      <div class="tab-panel" id="addTabSession">
+      <div class="tab-panel" id="addTabLogin">
+        <label class="fld"><span class="lb">站点</span>
+          <select id="loginRegion">
+            <option value="cn" selected>国内版 · monkeycode-ai.com</option>
+            <option value="intl">国际版 · monkeycode-ai.net</option>
+          </select>
+        </label>
+        <label class="fld"><span class="lb">账号</span>
+          <input id="loginEmail" autocomplete="username" placeholder="注册邮箱">
+        </label>
+        <label class="fld"><span class="lb">密码</span>
+          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="账号密码">
+          <span class="hint">只支持「账号密码登录」。用百智云 / Google / GitHub 登录的账号没有密码，请改用粘贴 Session。</span>
+        </label>
+      </div>
+      <div class="tab-panel" id="addTabSession" hidden>
         <label class="fld"><span class="lb">站点</span>
           <select id="addRegion">
             <option value="cn" selected>国内版 · monkeycode-ai.com</option>

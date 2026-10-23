@@ -226,7 +226,11 @@ $('btnBalanceAll').onclick = async e => {
 function addOpen() {
   $('addVeil').classList.add('on');
   $('addState').hidden = true;
-  setTimeout(() => $('addSession').focus(), 60);
+  setTimeout(() => {
+    const tab = document.querySelector('#addTabs .tab.on').dataset.tab;
+    const el = tab === 'login' ? $('loginEmail') : tab === 'json' ? $('addJSON') : $('addSession');
+    el.focus();
+  }, 60);
 }
 function addClose() { $('addVeil').classList.remove('on'); }
 $('btnAdd').onclick = addOpen;
@@ -234,6 +238,7 @@ $('btnAddClose').onclick = addClose;
 $('addVeil').addEventListener('click', e => { if (e.target === $('addVeil')) addClose(); });
 document.querySelectorAll('#addTabs .tab').forEach(t => t.onclick = () => {
   document.querySelectorAll('#addTabs .tab').forEach(x => x.classList.toggle('on', x === t));
+  $('addTabLogin').hidden = t.dataset.tab !== 'login';
   $('addTabSession').hidden = t.dataset.tab !== 'session';
   $('addTabJson').hidden = t.dataset.tab !== 'json';
 });
@@ -246,15 +251,25 @@ function addState(msg, cls) {
 $('btnAddSubmit').onclick = async () => {
   const b = $('btnAddSubmit');
   b.disabled = true;
-  const isJSON = !$('addTabJson').hidden;
-  addState('校验登录态…', 'dots');
+  const tab = document.querySelector('#addTabs .tab.on').dataset.tab;
+  addState(tab === 'login' ? '登录中（先解验证码，约 2 秒）…' : '校验登录态…', 'dots');
   try {
-    if (isJSON) {
+    if (tab === 'json') {
       const raw = $('addJSON').value.trim();
       if (!raw) throw new Error('先粘贴账号 JSON');
       const r = await api('accounts/import', { method: 'POST', body: raw });
       toast('已导入 ' + r.added + ' 个账号' + (r.failed ? '，失败 ' + r.failed : ''), r.failed ? 'err' : 'ok');
       $('addJSON').value = '';
+    } else if (tab === 'login') {
+      const email = $('loginEmail').value.trim();
+      const password = $('loginPassword').value;
+      if (!email || !password) throw new Error('先填账号和密码');
+      const r = await api('accounts/login', {
+        method: 'POST',
+        body: JSON.stringify({ region: $('loginRegion').value, email, password }),
+      });
+      toast(r.warning || '已登录并添加 ' + (r.account && r.account.name || ''), r.warning ? 'err' : 'ok');
+      $('loginPassword').value = '';
     } else {
       const session = $('addSession').value.trim();
       if (!session) throw new Error('先粘贴 session');

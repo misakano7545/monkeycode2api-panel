@@ -43,9 +43,26 @@ cp config.example.json config.json
 export MC2A_API_KEY=$(openssl rand -hex 32)   # 或写进 config.json 的 api_key
 ```
 
-### 2. 添加账号（粘贴 session）
+### 2. 添加账号
 
-MonkeyCode 的密码登录要 go-cap 验证码、OAuth 要百智云短信，都自动化不了；唯一稳的路是粘 cookie：
+**方式 A：账号密码登录（面板里点「添加账号」→ 账号密码登录）**
+
+服务端完整模拟官网登录：`POST /api/v1/public/captcha/challenge` → 本地解 Cap.js PoW →
+`redeem` 换 `captcha_token` → `POST /api/v1/users/password-login` → 取 `Set-Cookie` 的 session →
+`GET /api/v1/users/status` 校验 → 自动发现 `image_id` → 落 `auths/`。密码只在这一次请求里出现，
+不落盘、不进日志。
+
+```bash
+curl -X POST localhost:7887/panel/api/accounts/login \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{"region":"cn","email":"you@example.com","password":"…"}'
+```
+
+限制：只覆盖**账号密码登录**。用百智云 OAuth / Google / GitHub 登录的账号本来就没有密码
+（`GET /api/v1/users/login` 是 302 到 `baizhi.cloud/oauth/authorize`，短信验证码自动化不了），
+团队管理员走的是 `/api/v1/teams/users/login` 另一套 cookie —— 这两种仍用方式 B。
+
+**方式 B：粘贴 session**
 
 1. 浏览器登录 <https://monkeycode-ai.com/>（国际版 <https://monkeycode-ai.net/>）；
 2. F12 → Application → Cookies → 复制 `monkeycode_ai_session` 的值；
@@ -91,6 +108,7 @@ GET  /panel/api/request_logs?limit=60 最近请求
 GET  /panel/api/config               当前配置（api_key 脱敏）
 POST /panel/api/config               保存配置（返回需重启的字段）
 POST /panel/api/accounts/add_session 粘贴 session 添加（校验 + 发现 image_id）
+POST /panel/api/accounts/login      账号密码登录（服务端解验证码换 cookie）
 POST /panel/api/accounts/import      批量导入账号 JSON
 POST /panel/api/accounts/{id}/checkin|balance|disable|revive|cooldown_clear|remove
 POST /panel/api/checkin_all          全部签到

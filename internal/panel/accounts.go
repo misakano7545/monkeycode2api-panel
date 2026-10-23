@@ -8,6 +8,7 @@ package panel
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -71,6 +72,11 @@ func (p *Panel) addSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "请粘贴 MonkeyCode 的 session cookie")
 		return
 	}
+	p.finishAdd(w, r, client, region, cookieName, session, req.ImageID)
+}
+
+// finishAdd 校验 session → 发现 image_id → 存账号（粘贴与密码登录共用同一条尾巴）。
+func (p *Panel) finishAdd(w http.ResponseWriter, r *http.Request, client *upstream.Client, region upstream.Region, cookieName, session, imageID string) {
 	cookie := cookieName + "=" + session
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
@@ -80,7 +86,7 @@ func (p *Panel) addSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "登录态校验失败："+err.Error()+"（确认 session 有效、站点选对：国内 .com / 国际 .net）")
 		return
 	}
-	imageID := strings.TrimSpace(req.ImageID)
+	imageID = strings.TrimSpace(imageID)
 	if imageID == "" {
 		imageID = client.DiscoverImageID(ctx, cookie)
 	}
@@ -102,7 +108,50 @@ func (p *Panel) addSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "保存账号失败："+err.Error())
 		return
 	}
+	log.Printf("panel: 账号已入库 %s（%s）", a.ID, region.Label())
 	okJSON(w, "已添加 "+a.ID, map[string]any{"account": a, "warning": imageWarn(imageID)})
+}
+
+type loginReq struct {
+	Region   string `json:"region"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+// loginAccount 模拟网页的「账号密码登录」：服务端解 Cap.js 验证码 → 换 session cookie → 落库。
+// 密码只在这一个请求里出现，不落盘、不进日志。
+func (p *Panel) loginAccount(w http.ResponseWriter, r *http.Request) {
+	var req loginReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "请求体不是合法 JSON")
+		return
+	}
+	region, err := upstream.ParseRegion(req.Region)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	email := strings.TrimSpace(req.Email)
+	if email == "" || req.Password == "" {
+		writeErr(w, http.StatusBadRequest, "请填账号和密码")
+		return
+	}
+	client := p.client(region)
+	if client == nil {
+		writeErr(w, http.StatusNotImplemented, "上游客户端未装配")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+
+	name, value, err := client.PasswordLogin(ctx, email, req.Password)
+	if err != nil {
+		log.Printf("panel: 密码登录失败 %s（%s）", region.Label(), err.Error())
+		writeErr(w, http.StatusBadRequest, "登录失败："+err.Error())
+		return
+	}
+	log.Printf("panel: 密码登录成功 %s", region.Label())
+	p.finishAdd(w, r, client, region, name, value, "")
 }
 
 // imageWarn 缺 image_id 的提示（上游建任务必填，新账号常拿不到）。
