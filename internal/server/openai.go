@@ -85,12 +85,28 @@ func (s *sseWriter) event(name string, v any) error {
 
 // record 写一条请求记录（面板与 /panel/api/usage 读它）。
 func (s *Server) record(protocol, model, account, region string, status int, chars int,
-	in, out int64, started time.Time, errMsg string) {
+	in, out int64, tools, calls int, started time.Time, errMsg string) {
 	s.Ledger.Add(usage.Record{
 		Time: time.Now().Unix(), Protocol: protocol, Model: model,
 		Account: account, Region: region, Status: status, Chars: chars,
 		Input: in, Output: out, Ms: time.Since(started).Milliseconds(), Error: errMsg,
+		ToolsDeclared: tools, ToolCalls: calls,
 	})
+}
+
+// toolCalls 数聚合响应里客户端可见的 tool_calls（两种组包形态都要认：[]map[string]any 与 []any）。
+func toolCalls(resp map[string]any) int {
+	choices, _ := resp["choices"].([]any)
+	if len(choices) == 0 {
+		return 0
+	}
+	ch, _ := choices[0].(map[string]any)
+	msg, _ := ch["message"].(map[string]any)
+	if list, ok := msg["tool_calls"].([]map[string]any); ok {
+		return len(list)
+	}
+	list, _ := msg["tool_calls"].([]any)
+	return len(list)
 }
 
 // ─── OpenAI: POST /v1/chat/completions ──────────────────────
@@ -105,6 +121,7 @@ type chatReq struct {
 	StreamOptions *struct {
 		IncludeUsage bool `json:"include_usage"`
 	} `json:"stream_options"`
+	Tools []json.RawMessage `json:"tools"` // 只数个数：上游没有工具通道，声明了也不下发
 }
 
 func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +150,8 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		code, typ, msg := classify(err)
 		writeOpenAIError(w, code, typ, msg)
-		s.record("openai", req.Model, "", "", code, chars, 0, 0, started, msg)
+		// 失败也留下声明数：请求没跑起来不代表客户端没声明工具。
+		s.record("openai", req.Model, "", "", code, chars, 0, 0, len(req.Tools), 0, started, msg)
 		return
 	}
 	defer sess.Close()
@@ -155,17 +173,18 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			code, typ, msg := classify(err)
 			writeOpenAIError(w, code, typ, msg)
-			s.record("openai", req.Model, sess.Account(), string(sess.lease.Region), code, chars, 0, 0, started, msg)
+			s.record("openai", req.Model, sess.Account(), string(sess.lease.Region), code, chars, 0, 0, len(req.Tools), 0, started, msg)
 			return
 		}
 		msg := map[string]any{"role": "assistant", "content": string(sb)}
-		writeJSON(w, http.StatusOK, map[string]any{
+		resp := map[string]any{
 			"id": id, "object": "chat.completion", "created": started.Unix(),
 			"model":   req.Model,
 			"choices": []any{map[string]any{"index": 0, "message": msg, "finish_reason": "stop"}},
 			"usage":   usageJSON(u),
-		})
-		s.record("openai", req.Model, sess.Account(), string(sess.lease.Region), 200, chars, inOf(u), outOf(u), started, "")
+		}
+		writeJSON(w, http.StatusOK, resp)
+		s.record("openai", req.Model, sess.Account(), string(sess.lease.Region), 200, chars, inOf(u), outOf(u), len(req.Tools), toolCalls(resp), started, "")
 		return
 	}
 
@@ -212,7 +231,8 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	_ = sse.raw("data: [DONE]\n\n")
-	s.record("openai", req.Model, sess.Account(), string(sess.lease.Region), status, chars, inOf(u), outOf(u), started, errMsg)
+	// 下行不发 tool_calls 帧，客户端可见的调用数恒为 0；声明数照记，停摆才看得见。
+	s.record("openai", req.Model, sess.Account(), string(sess.lease.Region), status, chars, inOf(u), outOf(u), len(req.Tools), 0, started, errMsg)
 }
 
 func usageJSON(u *upstream.Usage) map[string]any {

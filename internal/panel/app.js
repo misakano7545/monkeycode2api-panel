@@ -368,8 +368,16 @@ async function loadUsage() {
       + '<td class="num">' + esc(r.model || '—') + '</td><td class="num">' + esc(r.account || '—') + '</td>'
       + '<td class="num">' + (bad ? '<span class="tag bad">' + r.status + '</span>' : '<span class="tag ok">' + r.status + '</span>') + '</td>'
       + '<td class="num">' + num(r.ms) + 'ms</td>'
+      + '<td class="num">' + toolCell(r) + '</td>'
       + '<td>' + (r.error ? '<span style="color:var(--bad)">' + esc(r.error) + '</span>' : '') + '</td></tr>';
-  }).join('') : '<tr><td colspan="7"><div class="empty">还没有请求</div></td></tr>';
+  }).join('') : '<tr><td colspan="8"><div class="empty">还没有请求</div></td></tr>';
+}
+// 工具面只显示声明数：本网关（ACP）的工具在 agent 内部执行，下行从不发 tool_calls 帧，
+// 调用数恒为 0 是结构决定的、不是停摆。标黄会把每一次带工具的请求都报成异常。
+function toolCell(r) {
+  const declared = Number(r.tools_declared || 0);
+  if (!declared) return '<span class="tag mute">—</span>';
+  return declared;
 }
 $('usDays').onchange = () => loadUsage().catch(e => toast(e.message, 'err'));
 

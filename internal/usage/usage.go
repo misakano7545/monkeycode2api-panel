@@ -25,6 +25,9 @@ type Record struct {
 	Output   int64  `json:"output"`
 	Ms       int64  `json:"ms"`
 	Error    string `json:"error,omitempty"`
+	// 工具面只数个数：声明>0 而调用==0 的一轮，客户端眼里什么都没发生，归档里却与正常收尾一样。
+	ToolsDeclared int `json:"tools_declared,omitempty"`
+	ToolCalls     int `json:"tool_calls,omitempty"`
 }
 
 // Day 一天的汇总。

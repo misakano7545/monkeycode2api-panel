@@ -20,7 +20,8 @@ type messagesReq struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 	} `json:"messages"`
-	Stream bool `json:"stream"`
+	Stream bool              `json:"stream"`
+	Tools  []json.RawMessage `json:"tools"` // 只数个数：上游没有工具通道，声明了也不下发
 }
 
 // countTokens Claude Code 会先探这个端点；上游没有对应能力，按字符数估一个值。
@@ -72,7 +73,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		code, typ, msg := classify(err)
 		writeAnthropicError(w, code, typ, msg)
-		s.record("claude", req.Model, "", "", code, chars, 0, 0, started, msg)
+		s.record("claude", req.Model, "", "", code, chars, 0, 0, len(req.Tools), 0, started, msg)
 		return
 	}
 	defer sess.Close()
@@ -93,7 +94,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			code, typ, msg := classify(err)
 			writeAnthropicError(w, code, typ, msg)
-			s.record("claude", req.Model, sess.Account(), string(sess.lease.Region), code, chars, 0, 0, started, msg)
+			s.record("claude", req.Model, sess.Account(), string(sess.lease.Region), code, chars, 0, 0, len(req.Tools), 0, started, msg)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -102,7 +103,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 			"stop_reason": "end_turn", "stop_sequence": nil,
 			"usage": map[string]any{"input_tokens": inOf(u), "output_tokens": outOf(u)},
 		})
-		s.record("claude", req.Model, sess.Account(), string(sess.lease.Region), 200, chars, inOf(u), outOf(u), started, "")
+		s.record("claude", req.Model, sess.Account(), string(sess.lease.Region), 200, chars, inOf(u), outOf(u), len(req.Tools), 0, started, "")
 		return
 	}
 
@@ -152,5 +153,5 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		"usage": map[string]any{"input_tokens": inOf(u), "output_tokens": outOf(u)},
 	})
 	_ = sse.event("message_stop", map[string]any{"type": "message_stop"})
-	s.record("claude", req.Model, sess.Account(), string(sess.lease.Region), status, chars, inOf(u), outOf(u), started, errMsg)
+	s.record("claude", req.Model, sess.Account(), string(sess.lease.Region), status, chars, inOf(u), outOf(u), len(req.Tools), 0, started, errMsg)
 }

@@ -13,10 +13,11 @@ import (
 // Codex CLI 走这条协议：input 是字符串或消息数组，流式要按事件序列下发
 // （created → item.added → text.delta → text.done → item.done → completed）。
 type responsesReq struct {
-	Model        string          `json:"model"`
-	Input        json.RawMessage `json:"input"`
-	Instructions string          `json:"instructions"`
-	Stream       bool            `json:"stream"`
+	Model        string            `json:"model"`
+	Input        json.RawMessage   `json:"input"`
+	Instructions string            `json:"instructions"`
+	Stream       bool              `json:"stream"`
+	Tools        []json.RawMessage `json:"tools"` // 只数个数：上游没有工具通道，声明了也不下发
 }
 
 func (s *Server) responses(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +47,7 @@ func (s *Server) responses(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		code, typ, msg := classify(err)
 		writeOpenAIError(w, code, typ, msg)
-		s.record("codex", req.Model, "", "", code, chars, 0, 0, started, msg)
+		s.record("codex", req.Model, "", "", code, chars, 0, 0, len(req.Tools), 0, started, msg)
 		return
 	}
 	defer sess.Close()
@@ -68,11 +69,11 @@ func (s *Server) responses(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			code, typ, msg := classify(err)
 			writeOpenAIError(w, code, typ, msg)
-			s.record("codex", req.Model, sess.Account(), string(sess.lease.Region), code, chars, 0, 0, started, msg)
+			s.record("codex", req.Model, sess.Account(), string(sess.lease.Region), code, chars, 0, 0, len(req.Tools), 0, started, msg)
 			return
 		}
 		writeJSON(w, http.StatusOK, responseObject(id, msgID, req.Model, started.Unix(), string(text), u))
-		s.record("codex", req.Model, sess.Account(), string(sess.lease.Region), 200, chars, inOf(u), outOf(u), started, "")
+		s.record("codex", req.Model, sess.Account(), string(sess.lease.Region), 200, chars, inOf(u), outOf(u), len(req.Tools), 0, started, "")
 		return
 	}
 
@@ -150,7 +151,7 @@ func (s *Server) responses(w http.ResponseWriter, r *http.Request) {
 			"response": responseObject(id, msgID, req.Model, started.Unix(), text, u),
 		})
 	}
-	s.record("codex", req.Model, sess.Account(), string(sess.lease.Region), status, chars, inOf(u), outOf(u), started, errMsg)
+	s.record("codex", req.Model, sess.Account(), string(sess.lease.Region), status, chars, inOf(u), outOf(u), len(req.Tools), 0, started, errMsg)
 }
 
 // responseObject 非流式与 response.completed 共用的响应体。
